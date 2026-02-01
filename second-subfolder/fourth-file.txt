@@ -1,1 +1,3 @@
-Fourth file txt
+Fourth file text
+
+This file was modified in the feature branch 
