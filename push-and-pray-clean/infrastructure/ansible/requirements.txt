@@ -1,0 +1,13 @@
+# Controller-side Python requirements for the OilScope Ansible tooling.
+#
+# The multi-cloud inventory wrapper delegates to the GCP and AWS inventory
+# plugins. GCP uses Application Default Credentials and AWS uses the standard
+# AWS SDK credential chain:
+#
+#     pip install -r infrastructure/ansible/requirements.txt
+#     gcloud auth application-default login
+#
+google-auth>=2.0.0
+requests>=2.25.0
+boto3>=1.34.0
+botocore>=1.34.0
