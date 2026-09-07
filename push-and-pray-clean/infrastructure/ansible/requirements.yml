@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+---
+# Ansible collections the controller needs, beyond this repository's own
+# oilscope.platform collection.
+#
+#   ansible-galaxy collection install -r infrastructure/ansible/requirements.yml
+collections:
+  # Live GCP discovery.
+  - name: google.cloud
+    version: ">=1.14.0"
+
+  # Live AWS EC2 discovery.
+  - name: amazon.aws
+    version: ">=9.0.0"
