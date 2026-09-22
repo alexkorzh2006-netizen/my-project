@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+---
+- name: Check the Compose definition
+  ansible.builtin.stat:
+    path: "{{ database_compose_file }}"
+  register: database_compose_definition
+
+- name: Pull the exact database migration image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - pull
+      - "{{ database_postgres_image }}"
+  environment:
+    DOCKER_CONFIG: "{{ database_docker_config_dir }}"
+  register: database_image_pull
+  changed_when: >-
+    'Downloaded newer image' in database_image_pull.stdout or
+    'Pull complete' in database_image_pull.stdout
+
+- name: Start the PostgreSQL service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ database_compose_project_name }}"
+      - --file
+      - "{{ database_compose_file }}"
+      - up
+      - --detach
+      - --no-deps
+      - "{{ database_postgres_service }}"
+  args:
+    chdir: "{{ database_compose_project_dir }}"
+  environment: "{{ database_runtime_environment }}"
+  register: database_compose_up
+  changed_when: >-
+    'Created' in database_compose_up.stderr or
+    'Started' in database_compose_up.stderr or
+    'Recreated' in database_compose_up.stderr
+  no_log: true
+  when: database_mode == 'self_hosted'
+
+- name: Get the PostgreSQL container ID
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ database_compose_project_name }}"
+      - --file
+      - "{{ database_compose_file }}"
+      - ps
+      - --quiet
+      - "{{ database_postgres_service }}"
+  args:
+    chdir: "{{ database_compose_project_dir }}"
+  environment: "{{ database_runtime_environment }}"
+  register: database_container
+  changed_when: false
+  failed_when: database_container.stdout | trim | length == 0
+  no_log: true
+  when: database_mode == 'self_hosted'
+
+- name: Wait for PostgreSQL to become healthy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{' }}if .State.Health{{ '}}' }}{{ '{{' }}.State.Health.Status{{ '}}' }}{{ '{{' }}else{{ '}}' }}missing{{ '{{' }}end{{ '}}' }}"
+      - "{{ database_container.stdout | trim }}"
+  register: database_health
+  changed_when: false
+  retries: "{{ database_health_retries }}"
+  delay: "{{ database_health_delay }}"
+  until: database_health.stdout | trim == 'healthy'
+  when: database_mode == 'self_hosted'
+
+- name: Check whether PostgreSQL accepts the configured password
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - --env
+      - "PGPASSWORD={{ database_postgres_password }}"
+      - "{{ database_container.stdout | trim }}"
+      - psql
+      - --host
+      - 127.0.0.1
+      - --username
+      - "{{ database_postgres_user }}"
+      - --dbname
+      - "{{ database_postgres_name }}"
+      - --no-psqlrc
+      - --tuples-only
+      - --command
+      - SELECT 1
+  register: database_password_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: database_mode == 'self_hosted'
+
+- name: Synchronize the PostgreSQL password with Secrets Manager
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - --interactive
+      - "{{ database_container.stdout | trim }}"
+      - psql
+      - --username
+      - "{{ database_postgres_user }}"
+      - --dbname
+      - "{{ database_postgres_name }}"
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+  args:
+    stdin: |
+      SELECT format(
+        'ALTER ROLE %I PASSWORD %L',
+        convert_from(
+          decode('{{ database_postgres_user | b64encode }}', 'base64'),
+          'UTF8'
+        ),
+        convert_from(
+          decode('{{ database_postgres_password | b64encode }}', 'base64'),
+          'UTF8'
+        )
+      ) \gexec
+  changed_when: true
+  no_log: true
+  when:
+    - database_mode == 'self_hosted'
+    - database_password_check.rc != 0
+
+- name: Stop the old PostgreSQL container without deleting its volume
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ database_compose_project_name }}"
+      - --file
+      - "{{ database_compose_file }}"
+      - stop
+      - "{{ database_postgres_service }}"
+  args:
+    chdir: "{{ database_compose_project_dir }}"
+  environment: "{{ database_runtime_environment }}"
+  register: database_postgres_stop
+  changed_when: "'Stopped' in database_postgres_stop.stderr"
+  failed_when: false
+  no_log: true
+  when: database_mode == 'managed'
+
+- name: Apply database migrations
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ database_compose_project_name }}"
+      - --file
+      - "{{ database_compose_file }}"
+      - run
+      - --rm
+      - --no-deps
+      - "{{ database_migration_service }}"
+  args:
+    chdir: "{{ database_compose_project_dir }}"
+  environment: "{{ database_runtime_environment }}"
+  register: database_migrations
+  changed_when: "'Applying ' in database_migrations.stdout"
+  no_log: true

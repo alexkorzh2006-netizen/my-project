@@ -1,0 +1,39 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+htmlcov/
+.coverage
+.vagrant/
+infrastructure/vagrant/config/vagrant.env
+node_modules/
+infrastructure/docker/deployment
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+infrastructure/terraform/legacy
+infrastructure/legacy_terraform
+*.tfvars
+*.tfvars.json
+*.tfplan
+**/tfplan
+crash.log
+crash.*.log
+*.json
+!infrastructure/terraform/*.json
+# Credentials and private keys
+*.pem
+*.key
+!project-config.example.json
+
+# Built Ansible collection artifacts
+.ansible/
+infrastructure/ansible/**/*.tar.gz
+infrastructure/ansible/inventory/oilscope.gcp.yml
+
+*.local.gcp.yml
