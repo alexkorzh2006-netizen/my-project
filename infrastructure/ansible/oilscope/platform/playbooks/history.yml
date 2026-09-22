@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+---
+- name: Deploy History
+  hosts: history
+  become: true
+  gather_facts: true
+  force_handlers: true
+  any_errors_fatal: true
+  roles:
+    - role: oilscope.platform.host_baseline
+
+    - role: oilscope.platform.docker_engine
+
+    - role: oilscope.platform.compose_project
+      vars:
+        compose_project_config_path: "{{ project_config_path }}"
+        compose_project_workload: "{{ oilscope_role }}"
+
+    - role: oilscope.platform.resolve_secrets
+      vars:
+        resolve_secrets_config_path: "{{ project_config_path }}"
+
+    - role: oilscope.platform.registry_auth
+      vars:
+        registry_auth_registry: >-
+          {{ compose_project_config.registry.repository
+             | regex_replace('/.*$', '') }}
+        registry_auth_username: >-
+          {{ compose_project_config.registry.username | default('') }}
+        registry_auth_token: >-
+          {{ resolve_secrets_result.GHCR_TOKEN | default('') }}
+
+    - role: oilscope.platform.history
+      vars:
+        history_postgres_password: "{{ resolve_secrets_result.POSTGRES_PASSWORD }}"
+        history_database_host: "{{ database_host }}"
+        history_database_port: "{{ database_port }}"
+        history_database_name: "{{ database_name }}"
+        history_database_user: "{{ database_user }}"
+        history_database_sslmode: "{{ database_sslmode }}"
+        history_queue_backend: "{{ queue_backend }}"
+        history_queue_name: price_observations
+        history_rabbitmq_url: >-
+          {{ 'amqp://' ~ (queue_username | urlencode)
+             ~ ':' ~ (resolve_secrets_result.RABBITMQ_PASSWORD
+                       | default('') | urlencode)
+             ~ '@' ~ queue_host ~ ':' ~ (queue_port | string)
+             ~ '/' ~ (queue_vhost | urlencode) }}

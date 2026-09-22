@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+---
+- name: Deploy only History
+  environment:
+    DOCKER_CONFIG: "{{ history_docker_config_dir }}"
+    POSTGRES_PASSWORD: "{{ history_postgres_password }}"
+    POSTGRES_PASSWORD_URLENCODED: "{{ history_postgres_password | urlencode }}"
+    POSTGRES_USER: "{{ history_database_user }}"
+    POSTGRES_USER_URLENCODED: "{{ history_database_user | urlencode }}"
+    POSTGRES_DB: "{{ history_database_name }}"
+    POSTGRES_DB_URLENCODED: "{{ history_database_name | urlencode }}"
+    DATABASE_HOST: "{{ history_database_host }}"
+    DATABASE_PORT: "{{ history_database_port | string }}"
+    DATABASE_SSLMODE: "{{ history_database_sslmode }}"
+    QUEUE_BACKEND: "{{ history_queue_backend }}"
+    QUEUE_NAME: "{{ history_queue_name }}"
+    RABBITMQ_URL: "{{ history_rabbitmq_url }}"
+  no_log: true
+  block:
+    - name: Pull the History image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ history_compose_project_name }}"
+          - --file
+          - "{{ history_compose_file }}"
+          - pull
+          - history
+      args:
+        chdir: "{{ history_compose_project_dir }}"
+      register: history_compose_pull
+      changed_when: >-
+        'Downloaded newer image' in history_compose_pull.stdout or
+        'Downloaded newer image' in history_compose_pull.stderr or
+        'Pull complete' in history_compose_pull.stdout or
+        'Pull complete' in history_compose_pull.stderr
+
+    - name: Start only History
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-name
+          - "{{ history_compose_project_name }}"
+          - --file
+          - "{{ history_compose_file }}"
+          - up
+          - --detach
+          - --no-deps
+          - history
+      args:
+        chdir: "{{ history_compose_project_dir }}"
+      register: history_compose_up
+      changed_when: >-
+        'Created' in history_compose_up.stderr or
+        'Started' in history_compose_up.stderr or
+        'Recreated' in history_compose_up.stderr
+
+- name: Wait for History to become healthy
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8001/health
+    status_code: 200
+    return_content: true
+    use_proxy: false
+  register: history_health
+  retries: "{{ history_health_retries }}"
+  delay: "{{ history_health_delay }}"
+  until:
+    - (history_health.json | default({})).get('status', '') == 'ok'
+    - >-
+      (history_health.json | default({})).get('database', '') == 'connected'
+    - >-
+      (history_health.json | default({})).get(
+        'queue_consumer',
+        (history_health.json | default({})).get('pgmq_consumer', '')
+        if history_queue_backend == 'pgmq' else ''
+      ) == 'ready'
+    - >-
+      (history_health.json | default({})).get(
+        'queue_backend',
+        'pgmq'
+        if history_queue_backend == 'pgmq' and
+           'pgmq_consumer' in (history_health.json | default({}))
+        else ''
+      ) == history_queue_backend
